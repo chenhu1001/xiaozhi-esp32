@@ -2,6 +2,9 @@ tmp/
 components/
 managed_components/
 build/
+# ESP-IDF variant build directories and exported firmware packages.
+build-*/
+firmware-*/
 dist/
 .vscode/
 .devcontainer/
