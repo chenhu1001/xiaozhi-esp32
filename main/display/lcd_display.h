@@ -29,7 +29,12 @@ protected:
     std::unique_ptr<LvglGif> gif_controller_ = nullptr;
     lv_obj_t* emoji_box_ = nullptr;
     lv_obj_t* chat_message_label_ = nullptr;
+    lv_obj_t* phone_notification_overlay_ = nullptr;
+    lv_obj_t* phone_notification_app_label_ = nullptr;
+    lv_obj_t* phone_notification_title_label_ = nullptr;
+    lv_obj_t* phone_notification_body_label_ = nullptr;
     esp_timer_handle_t preview_timer_ = nullptr;
+    esp_timer_handle_t phone_notification_timer_ = nullptr;
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
 
@@ -49,6 +54,9 @@ public:
     virtual void ClearChatMessages() override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
     virtual void SetupUI() override;
+    virtual void ShowPhoneNotification(const PhoneNotification& notification,
+                                       int duration_ms = 8000) override;
+    virtual void DismissPhoneNotification() override;
     // Add theme switching function
     virtual void SetTheme(Theme* theme) override;
 

@@ -26,6 +26,18 @@ void Display::ShowNotification(const char* notification, int duration_ms) {
     ESP_LOGW(TAG, "ShowNotification: %s", notification);
 }
 
+void Display::ShowPhoneNotification(const PhoneNotification& notification, int duration_ms) {
+    std::string message = notification.app_identifier;
+    const auto content = notification.ToDisplayText();
+    if (!message.empty() && !content.empty()) {
+        message += ": ";
+    }
+    message += content;
+    ShowNotification(message, duration_ms);
+}
+
+void Display::DismissPhoneNotification() {}
+
 void Display::UpdateStatusBar(bool update_all) {}
 
 void Display::SetEmotion(const char* emotion) { ESP_LOGW(TAG, "SetEmotion: %s", emotion); }

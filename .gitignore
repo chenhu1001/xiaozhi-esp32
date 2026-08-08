@@ -18,3 +18,8 @@ main/mmap_generate_emoji.h
 *.bin
 mmap_generate_*.h
 .clangd
+
+# Local ANCS build outputs and iOS distribution archive.
+build-ancs/
+firmware-ancs/
+ios/XiaozhiANCSConnector.rar

@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include "phone_notification.h"
+
 class Theme {
 public:
     Theme(const std::string& name) : name_(name) {}
@@ -37,6 +39,9 @@ public:
     virtual void SetStatus(const char* status);
     virtual void ShowNotification(const char* notification, int duration_ms = 3000);
     virtual void ShowNotification(const std::string& notification, int duration_ms = 3000);
+    virtual void ShowPhoneNotification(const PhoneNotification& notification,
+                                       int duration_ms = 8000);
+    virtual void DismissPhoneNotification();
     virtual void SetEmotion(const char* emotion);
     virtual void SetChatMessage(const char* role, const char* content);
     virtual void ClearChatMessages();

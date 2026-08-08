@@ -10,6 +10,9 @@
 #include "system_info.h"
 #include "text_glyph_payload.h"
 #include "websocket_protocol.h"
+#if CONFIG_ENABLE_IOS_ANCS
+#include "bluetooth/ancs_client.h"
+#endif
 
 #include <driver/gpio.h>
 #include <esp_log.h>
@@ -43,6 +46,21 @@ Application::Application() {
                                                 .name = "clock_timer",
                                                 .skip_unhandled_events = true};
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+
+#if CONFIG_ENABLE_IOS_ANCS
+    esp_timer_create_args_t notification_tts_timer_args = {
+        .callback =
+            [](void* arg) {
+                auto* app = static_cast<Application*>(arg);
+                app->Schedule([app]() { app->FinishNotificationSpeech(false); });
+            },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "notification_tts",
+        .skip_unhandled_events = true,
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&notification_tts_timer_args, &notification_tts_timer_));
+#endif
 }
 
 Application::~Application() {
@@ -50,6 +68,12 @@ Application::~Application() {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
     }
+#if CONFIG_ENABLE_IOS_ANCS
+    if (notification_tts_timer_ != nullptr) {
+        esp_timer_stop(notification_tts_timer_);
+        esp_timer_delete(notification_tts_timer_);
+    }
+#endif
     vEventGroupDelete(event_group_);
 }
 
@@ -84,6 +108,19 @@ void Application::Initialize() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_PLAYBACK_DRAINED);
     };
     audio_service_.SetCallbacks(callbacks);
+
+#if CONFIG_ENABLE_IOS_ANCS
+    notification_controller_ = std::make_unique<NotificationController>(
+        [display](const PhoneNotification& notification) {
+            display->ShowPhoneNotification(notification);
+        },
+        [this](const PhoneNotification& notification) { QueueNotificationSpeech(notification); });
+    ancs_client_ = std::make_unique<AncsClient>([this](PhoneNotification notification) {
+        Schedule([this, notification = std::move(notification)]() mutable {
+            notification_controller_->Publish(std::move(notification));
+        });
+    });
+#endif
 
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
@@ -317,6 +354,9 @@ void Application::HandleActivationDoneEvent() {
     ESP_LOGI(TAG, "Activation done");
 
     SystemInfo::PrintHeapStats();
+#if CONFIG_ENABLE_IOS_ANCS
+    StartAncsClient();
+#endif
     SetDeviceState(kDeviceStateIdle);
 
     has_server_time_ = ota_->HasServerTime();
@@ -534,6 +574,11 @@ void Application::InitializeProtocol() {
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
+#if CONFIG_ENABLE_IOS_ANCS
+            if (notification_tts_waiting_) {
+                FinishNotificationSpeech(false);
+            }
+#endif
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
@@ -554,11 +599,22 @@ void Application::InitializeProtocol() {
             }
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
+#if CONFIG_ENABLE_IOS_ANCS
+                    if (notification_tts_waiting_) {
+                        esp_timer_stop(notification_tts_timer_);
+                    }
+#endif
                     aborted_ = false;
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
+#if CONFIG_ENABLE_IOS_ANCS
+                    if (notification_tts_waiting_) {
+                        FinishNotificationSpeech(true);
+                        return;
+                    }
+#endif
                     if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -966,6 +1022,12 @@ void Application::HandleStateChangedEvent() {
             // Do nothing
             break;
     }
+
+#if CONFIG_ENABLE_IOS_ANCS
+    if (new_state == kDeviceStateIdle) {
+        TrySpeakNextNotification();
+    }
+#endif
 }
 
 void Application::StartListeningAudio() {
@@ -1178,6 +1240,70 @@ void Application::SetAecMode(AecMode mode) {
 }
 
 void Application::PlaySound(const std::string_view& sound) { audio_service_.PlaySound(sound); }
+
+#if CONFIG_ENABLE_IOS_ANCS
+void Application::StartAncsClient() {
+    // SoftAP provisioning and NimBLE both require internal SRAM on ESP32-S3.
+    // Start scanning only after Wi-Fi activation has completed to keep the
+    // provisioning fallback stable when no known network is available.
+    if (ancs_client_ && !ancs_client_->Start()) {
+        ESP_LOGE(TAG, "Unable to start iOS ANCS client");
+    }
+}
+
+void Application::QueueNotificationSpeech(const PhoneNotification& notification) {
+    if (notification.ToSpeechText().empty()) {
+        return;
+    }
+    if (notification_speech_queue_.size() == 10) {
+        notification_speech_queue_.pop_front();
+    }
+    notification_speech_queue_.push_back(notification);
+    TrySpeakNextNotification();
+}
+
+void Application::TrySpeakNextNotification() {
+    if (notification_tts_waiting_ || notification_speech_queue_.empty() ||
+        GetDeviceState() != kDeviceStateIdle) {
+        return;
+    }
+
+    if (!protocol_) {
+        FinishNotificationSpeech(false);
+        return;
+    }
+
+    notification_tts_waiting_ = true;
+    listening_mode_ = kListeningModeManualStop;
+    if (!protocol_->OpenAudioChannel() ||
+        !protocol_->RequestNotificationTts(notification_speech_queue_.front().ToSpeechText())) {
+        FinishNotificationSpeech(false);
+        return;
+    }
+
+    ESP_ERROR_CHECK(esp_timer_start_once(notification_tts_timer_, 5000000));
+}
+
+void Application::FinishNotificationSpeech(bool spoken) {
+    if (!notification_tts_waiting_ || notification_speech_queue_.empty()) {
+        return;
+    }
+
+    notification_tts_waiting_ = false;
+    esp_timer_stop(notification_tts_timer_);
+    notification_speech_queue_.pop_front();
+    if (!spoken) {
+        ESP_LOGW(TAG, "Notification TTS unavailable; playing fallback prompt");
+        audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+    }
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        protocol_->CloseAudioChannel();
+        return;
+    }
+    SetDeviceState(kDeviceStateIdle);
+    TrySpeakNextNotification();
+}
+#endif
 
 void Application::ResetProtocol() {
     Schedule([this]() {

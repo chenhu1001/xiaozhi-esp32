@@ -984,6 +984,28 @@ menu "WiFi Configuration Method"
             The provisioning client must support ffdhe3072, SHA-256, and AES-CTR.
 endmenu
 
+menu "iOS Notification Center"
+    config ENABLE_IOS_ANCS
+        bool "Enable iOS ANCS notification client"
+        depends on IDF_TARGET_ESP32S3 && BOARD_TYPE_LICHUANG_DEV_S3
+        depends on !USE_ESP_BLUFI_WIFI_PROVISIONING
+        depends on BT_NIMBLE_ENABLED
+        default y
+        select BT_NIMBLE_ROLE_CENTRAL
+        select BT_NIMBLE_ROLE_PERIPHERAL
+        select BT_NIMBLE_GATT_CLIENT
+        select BT_NIMBLE_GATT_SERVER
+        select BT_NIMBLE_SECURITY_ENABLE
+        help
+            Advertise a companion BLE service for an iPhone or iPad app to
+            connect with Apple's Notification Center Service (ANCS)
+            authorization. Before enabling this option, select Bluetooth,
+            NimBLE - BLE only and Controller: Enabled under Component config.
+            ANCS then enables Central/Peripheral, GATT Server/GATT Client and
+            Security. Pairing is session-only: notification data and BLE
+            bonding keys are not persisted across a reboot.
+endmenu
+
 config AUDIO_DEBUG_UDP_SERVER
     string "Audio Debug UDP Server Address"
     default "192.168.2.100:8000"

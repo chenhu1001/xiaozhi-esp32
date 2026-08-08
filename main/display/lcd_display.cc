@@ -94,6 +94,92 @@ LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
         .skip_unhandled_events = false,
     };
     esp_timer_create(&preview_timer_args, &preview_timer_);
+
+    esp_timer_create_args_t phone_notification_timer_args = {
+        .callback = [](void* arg) { static_cast<LcdDisplay*>(arg)->DismissPhoneNotification(); },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "phone_notice",
+        .skip_unhandled_events = true,
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&phone_notification_timer_args, &phone_notification_timer_));
+}
+
+void LcdDisplay::ShowPhoneNotification(const PhoneNotification& notification, int duration_ms) {
+    if (!setup_ui_called_) {
+        return;
+    }
+
+    DisplayLockGuard lock(this);
+    auto theme = static_cast<LvglTheme*>(current_theme_);
+    if (phone_notification_overlay_ == nullptr) {
+        phone_notification_overlay_ = lv_obj_create(lv_screen_active());
+        lv_obj_set_size(phone_notification_overlay_, LV_HOR_RES, LV_VER_RES);
+        lv_obj_set_style_radius(phone_notification_overlay_, 0, 0);
+        lv_obj_set_style_border_width(phone_notification_overlay_, 0, 0);
+        lv_obj_set_style_bg_color(phone_notification_overlay_, theme->background_color(), 0);
+        lv_obj_set_style_pad_all(phone_notification_overlay_, theme->spacing(5), 0);
+        lv_obj_set_flex_flow(phone_notification_overlay_, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(phone_notification_overlay_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_START);
+        lv_obj_set_style_pad_row(phone_notification_overlay_, theme->spacing(2), 0);
+
+        phone_notification_app_label_ = lv_label_create(phone_notification_overlay_);
+        lv_obj_set_width(phone_notification_app_label_, LV_PCT(100));
+        lv_obj_set_style_text_color(phone_notification_app_label_, theme->text_color(), 0);
+
+        phone_notification_title_label_ = lv_label_create(phone_notification_overlay_);
+        lv_obj_set_width(phone_notification_title_label_, LV_PCT(100));
+        lv_label_set_long_mode(phone_notification_title_label_, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_color(phone_notification_title_label_, theme->text_color(), 0);
+
+        lv_obj_t* body = lv_obj_create(phone_notification_overlay_);
+        lv_obj_set_width(body, LV_PCT(100));
+        lv_obj_set_flex_grow(body, 1);
+        lv_obj_set_style_radius(body, 0, 0);
+        lv_obj_set_style_border_width(body, 0, 0);
+        lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_pad_all(body, 0, 0);
+        lv_obj_set_scroll_dir(body, LV_DIR_VER);
+        lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_AUTO);
+        phone_notification_body_label_ = lv_label_create(body);
+        lv_obj_set_width(phone_notification_body_label_, LV_PCT(100));
+        lv_label_set_long_mode(phone_notification_body_label_, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_color(phone_notification_body_label_, theme->text_color(), 0);
+
+        lv_obj_add_event_cb(
+            phone_notification_overlay_,
+            [](lv_event_t* event) {
+                static_cast<LcdDisplay*>(lv_event_get_user_data(event))->DismissPhoneNotification();
+            },
+            LV_EVENT_CLICKED, this);
+    }
+
+    lv_label_set_text(phone_notification_app_label_, notification.app_identifier.c_str());
+    lv_label_set_text(phone_notification_title_label_, notification.title.c_str());
+    std::string body = notification.subtitle;
+    if (!body.empty() && !notification.message.empty()) {
+        body += "\n";
+    }
+    body += notification.message;
+    if (notification.truncated) {
+        body += "\n...";
+    }
+    lv_label_set_text(phone_notification_body_label_, body.c_str());
+    lv_obj_remove_flag(phone_notification_overlay_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(phone_notification_overlay_);
+    esp_timer_stop(phone_notification_timer_);
+    ESP_ERROR_CHECK(
+        esp_timer_start_once(phone_notification_timer_, static_cast<uint64_t>(duration_ms) * 1000));
+}
+
+void LcdDisplay::DismissPhoneNotification() {
+    DisplayLockGuard lock(this);
+    if (phone_notification_overlay_ == nullptr) {
+        return;
+    }
+    esp_timer_stop(phone_notification_timer_);
+    lv_obj_add_flag(phone_notification_overlay_, LV_OBJ_FLAG_HIDDEN);
 }
 
 SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,

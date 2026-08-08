@@ -2,6 +2,7 @@
 #include "assets.h"
 
 #include <esp_log.h>
+#include <cJSON.h>
 
 #define TAG "Protocol"
 
@@ -95,6 +96,19 @@ void Protocol::SendMcpMessage(const std::string& payload) {
     std::string message =
         "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
     SendText(message);
+}
+
+bool Protocol::RequestNotificationTts(const std::string& text) {
+    cJSON* message = cJSON_CreateObject();
+    cJSON_AddStringToObject(message, "session_id", session_id_.c_str());
+    cJSON_AddStringToObject(message, "type", "notification");
+    cJSON_AddStringToObject(message, "state", "speak");
+    cJSON_AddStringToObject(message, "text", text.c_str());
+    char* serialized = cJSON_PrintUnformatted(message);
+    const bool sent = serialized != nullptr && SendText(serialized);
+    cJSON_free(serialized);
+    cJSON_Delete(message);
+    return sent;
 }
 
 bool Protocol::IsTimeout() const {
