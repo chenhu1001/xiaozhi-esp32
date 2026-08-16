@@ -894,6 +894,16 @@ endif()
 if (CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING)
     list(APPEND SOURCES "boards/common/blufi.cpp")
 endif ()
+
+if (CONFIG_ENABLE_IOS_ANCS_RELAY)
+    list(APPEND SOURCES
+        "bluetooth/ancs_attribute_parser.cc"
+        "bluetooth/ancs_client.cc"
+        "bluetooth/ancs_relay_service.cc"
+        "bluetooth/ancs_webhook.cc"
+        "bluetooth/notification_relay.cc"
+    )
+endif ()
 # Select language directory according to Kconfig
 if(CONFIG_LANGUAGE_ZH_CN)
     set(LANG_DIR "zh-CN")

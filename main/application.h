@@ -18,6 +18,10 @@
 #include "device_state.h"
 #include "device_state_machine.h"
 
+#if CONFIG_ENABLE_IOS_ANCS_RELAY
+class AncsRelayService;
+#endif
+
 // Main event bits
 #define MAIN_EVENT_SCHEDULE             (1 << 0)
 #define MAIN_EVENT_SEND_AUDIO           (1 << 1)
@@ -138,6 +142,9 @@ private:
     std::string last_error_message_;
     AudioService audio_service_;
     std::unique_ptr<Ota> ota_;
+#if CONFIG_ENABLE_IOS_ANCS_RELAY
+    std::unique_ptr<AncsRelayService> ancs_relay_;
+#endif
 
     std::function<void(const std::string&)> mcp_broadcast_callback_;
 

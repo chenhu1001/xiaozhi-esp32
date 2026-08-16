@@ -987,6 +987,29 @@ menu "WiFi Configuration Method"
             The provisioning client must support ffdhe3072, SHA-256, and AES-CTR.
 endmenu
 
+config ENABLE_IOS_ANCS_RELAY
+    bool "Enable iOS ANCS notification HTTPS relay"
+    default n
+    depends on IDF_TARGET_ESP32S3 && BOARD_TYPE_LICHUANG_DEV_S3
+    depends on !USE_ESP_BLUFI_WIFI_PROVISIONING
+    depends on BT_NIMBLE_ENABLED
+    select BT_NIMBLE_ROLE_CENTRAL
+    select BT_NIMBLE_ROLE_PERIPHERAL
+    select BT_NIMBLE_ROLE_BROADCASTER
+    select BT_NIMBLE_GATT_CLIENT
+    select BT_NIMBLE_GATT_SERVER
+    select BT_NIMBLE_SECURITY_ENABLE
+    select BT_NIMBLE_SM_SC
+    select BT_NIMBLE_NVS_PERSIST
+    select BT_NIMBLE_EXTRA_ADV_FIELDS
+    select BT_NIMBLE_DIS_SERVICE
+    select BT_NIMBLE_SVC_DIS_MANUFACTURER_NAME
+    select BT_NIMBLE_SVC_DIS_FIRMWARE_REVISION
+    help
+        Pair one iPhone directly from iOS Bluetooth settings, receive ANCS
+        notifications, and forward them to the configured HTTPS endpoint.
+        Notification text is held in RAM only and is always logged to UART.
+
 config AUDIO_DEBUG_UDP_SERVER
     string "Audio Debug UDP Server Address"
     default "192.168.2.100:8000"

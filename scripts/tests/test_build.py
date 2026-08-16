@@ -55,6 +55,7 @@ class VersionTests(unittest.TestCase):
         self.assertIn("labplus-ledong-v2", idf6_names)
         self.assertNotIn("labplus-labplus-ledong-v2", idf6_names)
         self.assertIn("lckfb-lichuang-dev", idf6_names)
+        self.assertIn("lckfb-lichuang-dev-ancs", idf6_names)
         self.assertIn("lckfb-lichuang-c3-dev", idf6_names)
         self.assertIn("wdmomo-esp32-cgc", idf6_names)
         self.assertIn("wdmomo-esp32-cgc-144", idf6_names)

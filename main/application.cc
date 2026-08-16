@@ -11,6 +11,10 @@
 #include "text_glyph_payload.h"
 #include "websocket_protocol.h"
 
+#if CONFIG_ENABLE_IOS_ANCS_RELAY
+#include "bluetooth/ancs_relay_service.h"
+#endif
+
 #include <driver/gpio.h>
 #include <esp_log.h>
 #include <arpa/inet.h>
@@ -46,6 +50,9 @@ Application::Application() {
 }
 
 Application::~Application() {
+#if CONFIG_ENABLE_IOS_ANCS_RELAY
+    ancs_relay_.reset();
+#endif
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
@@ -58,6 +65,14 @@ bool Application::SetDeviceState(DeviceState state) { return state_machine_.Tran
 void Application::Initialize() {
     auto& board = Board::GetInstance();
     SetDeviceState(kDeviceStateStarting);
+
+#if CONFIG_ENABLE_IOS_ANCS_RELAY
+    ancs_relay_ = std::make_unique<AncsRelayService>();
+    if (!ancs_relay_->Start()) {
+        ESP_LOGE(TAG, "Failed to start iOS ANCS relay");
+        ancs_relay_.reset();
+    }
+#endif
 
     // Setup the display
     auto display = board.GetDisplay();
@@ -274,6 +289,11 @@ void Application::Run() {
 
 void Application::HandleNetworkConnectedEvent() {
     ESP_LOGI(TAG, "Network connected");
+#if CONFIG_ENABLE_IOS_ANCS_RELAY
+    if (ancs_relay_) {
+        ancs_relay_->SetNetworkConnected(true);
+    }
+#endif
     auto state = GetDeviceState();
 
     if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {
@@ -300,6 +320,11 @@ void Application::HandleNetworkConnectedEvent() {
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+#if CONFIG_ENABLE_IOS_ANCS_RELAY
+    if (ancs_relay_) {
+        ancs_relay_->SetNetworkConnected(false);
+    }
+#endif
     // Close current conversation when network disconnected
     auto state = GetDeviceState();
     if (state == kDeviceStateConnecting || state == kDeviceStateListening ||
