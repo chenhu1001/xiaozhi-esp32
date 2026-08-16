@@ -12,8 +12,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "healthcheck" {
+		runHealthcheck()
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	store, err := OpenEventStore(envOrDefault("ANCS_DATA_FILE", "data/ancs-events.ndjson"))
+	store, err := OpenEventStore(envOrDefault("ANCS_DB_FILE", "data/ancs.db"))
 	if err != nil {
 		logger.Error("open event store", "error", err)
 		os.Exit(1)
@@ -40,26 +44,24 @@ func main() {
 		}
 	}()
 
-	certFile := os.Getenv("ANCS_TLS_CERT_FILE")
-	keyFile := os.Getenv("ANCS_TLS_KEY_FILE")
-	if (certFile == "") != (keyFile == "") {
-		logger.Error("ANCS_TLS_CERT_FILE and ANCS_TLS_KEY_FILE must be configured together")
-		os.Exit(1)
-	}
 	logger.Info("ANCS relay server listening",
 		"address", server.Addr,
-		"tls", certFile != "",
-		"events", store.Count(),
+		"protocol", "http",
 	)
-	if certFile != "" {
-		err = server.ListenAndServeTLS(certFile, keyFile)
-	} else {
-		err = server.ListenAndServe()
-	}
+	err = server.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("serve HTTP", "error", err)
 		os.Exit(1)
 	}
+}
+
+func runHealthcheck() {
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get("http://127.0.0.1:8080/healthz")
+	if err != nil || response.StatusCode != http.StatusOK {
+		os.Exit(1)
+	}
+	response.Body.Close()
 }
 
 func envOrDefault(name, fallback string) string {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -30,18 +31,22 @@ func TestReceiveAndDeduplicateNotification(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("duplicate request status = %d, body = %s", response.Code, response.Body.String())
 	}
-	if store.Count() != 1 {
-		t.Fatalf("stored event count = %d, want 1", store.Count())
+	count, err := store.Count(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("stored event count = %d, want 1", count)
 	}
 }
 
 func TestPersistenceRestoresIdempotency(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "events.ndjson")
+	path := filepath.Join(t.TempDir(), "ancs.db")
 	store, err := OpenEventStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored, err := store.Save(validEvent()); err != nil || !stored {
+	if stored, err := store.Save(context.Background(), validEvent()); err != nil || !stored {
 		t.Fatalf("Save() = %v, %v", stored, err)
 	}
 	if err := store.Close(); err != nil {
@@ -53,7 +58,7 @@ func TestPersistenceRestoresIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { reopened.Close() })
-	if stored, err := reopened.Save(validEvent()); err != nil || stored {
+	if stored, err := reopened.Save(context.Background(), validEvent()); err != nil || stored {
 		t.Fatalf("duplicate Save() = %v, %v", stored, err)
 	}
 }
@@ -132,7 +137,7 @@ func TestHealthAndMethodHandling(t *testing.T) {
 
 func newTestAPI(t *testing.T) (*EventStore, http.Handler) {
 	t.Helper()
-	store, err := OpenEventStore(filepath.Join(t.TempDir(), "events.ndjson"))
+	store, err := OpenEventStore(filepath.Join(t.TempDir(), "ancs.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

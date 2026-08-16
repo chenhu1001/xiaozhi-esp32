@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"regexp"
 )
@@ -96,6 +97,9 @@ func (event NotificationEnvelope) Validate(deviceIDHeader, clientIDHeader string
 	}
 	if event.ANCS.Sequence == 0 {
 		return fmt.Errorf("ancs.sequence must be greater than zero")
+	}
+	if event.ANCS.Sequence > math.MaxInt64 {
+		return fmt.Errorf("ancs.sequence exceeds SQLite integer range")
 	}
 	expectedEventID := fmt.Sprintf("%s:%s:%d", event.Device.ID, event.ANCS.SessionID, event.ANCS.Sequence)
 	if event.EventID != expectedEventID {

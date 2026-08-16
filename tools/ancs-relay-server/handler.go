@@ -35,9 +35,14 @@ func (api *API) health(writer http.ResponseWriter, request *http.Request) {
 		writeError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "use GET")
 		return
 	}
+	count, err := api.store.Count(request.Context())
+	if err != nil {
+		writeError(writer, http.StatusServiceUnavailable, "storage_unavailable", "SQLite is unavailable")
+		return
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"status": "ok",
-		"events": api.store.Count(),
+		"events": count,
 	})
 }
 
@@ -80,7 +85,7 @@ func (api *API) receiveNotification(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
-	stored, err := api.store.Save(event)
+	stored, err := api.store.Save(request.Context(), event)
 	if err != nil {
 		api.logger.Error("store ANCS event", "event_id", event.EventID, "error", err)
 		writeError(writer, http.StatusServiceUnavailable, "storage_unavailable", "event was not durably stored")

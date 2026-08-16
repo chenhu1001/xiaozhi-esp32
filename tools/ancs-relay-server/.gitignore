@@ -1,4 +1,6 @@
 /.gocache/
+/.gomodcache/
 /.gotmp/
 /ancs-relay-server.exe
 /data/
+/.env
