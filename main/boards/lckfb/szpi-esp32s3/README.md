@@ -18,6 +18,11 @@ Configure the device's Wi-Fi through the existing hotspot provisioning flow.
 The ANCS variant intentionally disables BluFi because both features would own
 the Bluetooth stack.
 
+The executable remains in flash. This variant places NimBLE's dynamic
+allocations and the 6 KiB HTTP relay task stack in the board's PSRAM, while the
+Bluetooth controller, task control blocks, DMA-capable buffers, and other
+latency-sensitive allocations remain in internal SRAM.
+
 Before deploying, replace `kAncsRelayEndpoint` in
 `main/bluetooth/ancs_relay_config.h`. Its checked-in value is deliberately
 non-routable:
@@ -38,7 +43,17 @@ Version 1 does not send an authorization credential.
 5. Leave Bluetooth enabled. The board advertises again after a disconnect and
    iOS can reconnect using its saved bond.
 
-The firmware accepts one saved phone. To replace it, run `idf.py erase-flash`,
+To make the accessory visible in iOS Settings, its connectable advertisement
+contains the standard HID Service UUID `0x1812`, Generic HID Appearance
+`0x03C0`, and the ANCS 128-bit Service Solicitation together. The local HID
+service exposes an encrypted Consumer Control report plus the HOGP Battery and
+Scan Parameters services, but never emits key events; it exists only as the
+system-settings pairing carrier. ANCS discovery and subscriptions begin only
+after the link encryption event succeeds.
+
+If the same iPhone has forgotten the accessory, select `Xiaozhi ANCS` again and
+the firmware replaces that phone's stale bond. The firmware still accepts only
+one saved phone. To replace it with another phone, run `idf.py erase-flash`,
 flash the firmware again, and remove the old `Xiaozhi ANCS` entry from the
 iPhone if necessary. Erasing flash also removes Wi-Fi credentials. A normal
 `idf.py flash` or OTA update does not remove the Bluetooth bond.

@@ -23,7 +23,34 @@ class AncsBuildConfigurationTests(unittest.TestCase):
         self.assertIn("CONFIG_BT_NIMBLE_NVS_PERSIST=y", ancs)
         self.assertIn("CONFIG_BT_NIMBLE_MAX_BONDS=1", ancs)
         self.assertIn("CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1", ancs)
+        self.assertIn("CONFIG_BT_NIMBLE_SM_LVL=2", ancs)
+        self.assertIn("CONFIG_BT_NIMBLE_SPS_SERVICE=y", ancs)
+        self.assertIn("CONFIG_BT_NIMBLE_BAS_SERVICE=y", ancs)
+        self.assertIn("CONFIG_BT_NIMBLE_HID_SERVICE=y", ancs)
+        self.assertIn("CONFIG_BT_NIMBLE_SVC_HID_MAX_INSTANCES=1", ancs)
+        self.assertIn("CONFIG_BT_NIMBLE_SVC_HID_MAX_RPTS=1", ancs)
+        self.assertIn("CONFIG_BT_NIMBLE_SVC_DIS_PNP_ID=y", ancs)
         self.assertIn("CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING=n", ancs)
+
+    def test_hid_pairing_carrier_keeps_ancs_solicitation(self):
+        client = (ROOT / "main/bluetooth/ancs_client.cc").read_text(encoding="utf-8")
+        relay = (ROOT / "main/bluetooth/notification_relay.cc").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("BLE_UUID16_INIT(0x1812)", client)
+        self.assertIn("kGenericHidAppearance = 0x03c0", client)
+        self.assertIn("fields.sol_uuids128 = &kAncsServiceUuid", client)
+        self.assertIn("#include <services/hid/ble_svc_hid.h>", client)
+        self.assertIn("ble_svc_hid_add(parameters)", client)
+        self.assertIn("ble_svc_hid_init()", client)
+        self.assertIn("ble_svc_bas_init()", client)
+        self.assertIn("ble_svc_sps_init(0, 0)", client)
+        self.assertIn("ble_hs_cfg.store_status_cb = ble_store_util_status_rr", client)
+        self.assertIn("BLE_GAP_REPEAT_PAIRING_RETRY", client)
+        self.assertIn("case BLE_GAP_EVENT_ENC_CHANGE", client)
+        self.assertIn("client->HandleEncryptedConnection", client)
+        self.assertIn("xTaskCreateWithCaps", relay)
+        self.assertIn("MALLOC_CAP_SPIRAM", relay)
 
     def test_kconfig_restricts_ancs_to_lichuang_s3_without_blufi(self):
         kconfig = (ROOT / "main/Kconfig.projbuild").read_text(encoding="utf-8")

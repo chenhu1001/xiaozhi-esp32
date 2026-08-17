@@ -5,7 +5,9 @@
 #include "board.h"
 #include "system_info.h"
 
+#include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <freertos/idf_additions.h>
 
 #include <algorithm>
 #include <cinttypes>
@@ -27,13 +29,15 @@ bool NotificationRelay::Start() {
     }
     stopping_ = false;
     TaskHandle_t task_handle = nullptr;
-    if (xTaskCreate(TaskEntry, "ancs_http", 6144, this, 1, &task_handle) != pdPASS) {
-        ESP_LOGE(kTag, "Unable to create HTTPS relay task");
+    if (xTaskCreateWithCaps(TaskEntry, "ancs_http", 6144, this, 1, &task_handle,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        ESP_LOGE(kTag, "Unable to create HTTP relay task in PSRAM");
         task_handle_ = nullptr;
         started_ = false;
         return false;
     }
     task_handle_ = task_handle;
+    ESP_LOGI(kTag, "HTTP relay task stack allocated in PSRAM");
     return true;
 }
 
@@ -80,7 +84,7 @@ void NotificationRelay::TaskEntry(void* arg) {
     auto* relay = static_cast<NotificationRelay*>(arg);
     relay->Run();
     relay->task_handle_ = nullptr;
-    vTaskDelete(nullptr);
+    vTaskDeleteWithCaps(nullptr);
 }
 
 void NotificationRelay::Run() {

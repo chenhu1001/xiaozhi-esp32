@@ -12,9 +12,12 @@
 #include <nimble/nimble_port.h>
 #include <nimble/nimble_port_freertos.h>
 #include <os/os_mbuf.h>
+#include <services/bas/ble_svc_bas.h>
 #include <services/dis/ble_svc_dis.h>
 #include <services/gap/ble_svc_gap.h>
 #include <services/gatt/ble_svc_gatt.h>
+#include <services/hid/ble_svc_hid.h>
+#include <services/sps/ble_svc_sps.h>
 
 #include <algorithm>
 #include <array>
@@ -45,6 +48,48 @@ constexpr uint32_t kDiscoveryRetryMs = 5000;
 const ble_uuid16_t kGattServiceUuid = BLE_UUID16_INIT(0x1801);
 const ble_uuid16_t kServiceChangedUuid = BLE_UUID16_INIT(0x2a05);
 const ble_uuid16_t kClientConfigurationUuid = BLE_UUID16_INIT(BLE_GATT_DSC_CLT_CFG_UUID16);
+const ble_uuid16_t kHidServiceUuid = BLE_UUID16_INIT(0x1812);
+
+constexpr uint16_t kGenericHidAppearance = 0x03c0;
+constexpr uint8_t kHidReportMap[] = {
+    0x05, 0x0c,  // Usage Page (Consumer)
+    0x09, 0x01,  // Usage (Consumer Control)
+    0xa1, 0x01,  // Collection (Application)
+    0x85, 0x01,  // Report ID (1)
+    0x15, 0x00,  // Logical Minimum (0)
+    0x25, 0x01,  // Logical Maximum (1)
+    0x09, 0xcd,  // Usage (Play/Pause)
+    0x09, 0xe9,  // Usage (Volume Increment)
+    0x09, 0xea,  // Usage (Volume Decrement)
+    0x75, 0x01,  // Report Size (1)
+    0x95, 0x03,  // Report Count (3)
+    0x81, 0x02,  // Input (Data, Variable, Absolute)
+    0x75, 0x05,  // Report Size (5)
+    0x95, 0x01,  // Report Count (1)
+    0x81, 0x03,  // Input (Constant, Variable, Absolute)
+    0xc0,        // End Collection
+};
+constexpr uint8_t kHidPnpId[] = {0x02, 0x3a, 0x30, 0x01, 0x40, 0x01, 0x01, 0x00};
+
+int RegisterHidService() {
+    ble_svc_hid_params parameters = {};
+    parameters.proto_mode_present = 1;
+    parameters.proto_mode = BLE_SVC_HID_PROTO_MODE_REPORT;
+    parameters.report_map_len = sizeof(kHidReportMap);
+    memcpy(parameters.report_map, kHidReportMap, sizeof(kHidReportMap));
+    parameters.external_rpt_ref = BLE_SVC_BAS_UUID16;
+    parameters.hid_info = 0x03000111;  // HID 1.11, remote wake, normally connectable.
+    parameters.rpts_len = 1;
+    parameters.rpts[0].id = 1;
+    parameters.rpts[0].type = BLE_SVC_HID_RPT_TYPE_INPUT;
+    parameters.rpts[0].len = 1;
+
+    const int result = ble_svc_hid_add(parameters);
+    if (result == 0) {
+        ble_svc_hid_init();
+    }
+    return result;
+}
 
 const ble_uuid128_t kAncsServiceUuid = BLE_UUID128_INIT(
     0xd0, 0x00, 0x2d, 0x12, 0x1e, 0x4b, 0x0f, 0xa4, 0x99, 0x4e, 0xce, 0xb5, 0x31, 0xf4, 0x05, 0x79);
@@ -98,6 +143,7 @@ bool AncsClient::Start() {
     instance_ = this;
     ble_hs_cfg.reset_cb = OnReset;
     ble_hs_cfg.sync_cb = OnSync;
+    ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_mitm = 0;
     ble_hs_cfg.sm_sc = 1;
@@ -108,10 +154,23 @@ bool AncsClient::Start() {
     ble_store_config_init();
     ble_svc_gap_init();
     ble_svc_gatt_init();
+    ble_svc_sps_init(0, 0);
+    ble_svc_bas_init();
     ble_svc_dis_init();
+    ble_svc_bas_battery_level_set(100);
     ble_svc_gap_device_name_set(kDeviceName);
+    ble_svc_gap_device_appearance_set(kGenericHidAppearance);
     ble_svc_dis_manufacturer_name_set("XiaoZhi");
     ble_svc_dis_firmware_revision_set(esp_app_get_description()->version);
+    ble_svc_dis_pnp_id_set(reinterpret_cast<const char*>(kHidPnpId));
+
+    const int hid_result = RegisterHidService();
+    if (hid_result != 0) {
+        ESP_LOGE(kTag, "Unable to register HID-over-GATT service: %d", hid_result);
+        nimble_port_deinit();
+        instance_ = nullptr;
+        return false;
+    }
 
     if (ble_npl_callout_init(&data_timeout_, nimble_port_get_dflt_eventq(), DataTimeout, this) !=
             0 ||
@@ -153,6 +212,11 @@ void AncsClient::StartAdvertising() {
     }
     ble_hs_adv_fields fields = {};
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    fields.uuids16 = &kHidServiceUuid;
+    fields.num_uuids16 = 1;
+    fields.uuids16_is_complete = 1;
+    fields.appearance = kGenericHidAppearance;
+    fields.appearance_is_present = 1;
     fields.sol_uuids128 = &kAncsServiceUuid;
     fields.sol_num_uuids128 = 1;
     int result = ble_gap_adv_set_fields(&fields);
@@ -177,18 +241,53 @@ void AncsClient::StartAdvertising() {
     result =
         ble_gap_adv_start(own_address_type_, nullptr, BLE_HS_FOREVER, &parameters, GapEvent, this);
     if (result == 0) {
-        ESP_LOGI(kTag, "Advertising as %s with ANCS service solicitation", kDeviceName);
+        ESP_LOGI(kTag,
+                 "Advertising as %s with HID 0x1812, appearance 0x%04x, and ANCS solicitation",
+                 kDeviceName, kGenericHidAppearance);
     } else {
         ESP_LOGE(kTag, "Unable to start advertising: %d", result);
     }
 }
 
 void AncsClient::BeginSecurity(uint16_t connection_handle) {
+    ble_gap_conn_desc descriptor = {};
+    if (ble_gap_conn_find(connection_handle, &descriptor) == 0) {
+        ESP_LOGI(kTag, "Security start: encrypted=%u authenticated=%u bonded=%u",
+                 descriptor.sec_state.encrypted, descriptor.sec_state.authenticated,
+                 descriptor.sec_state.bonded);
+        if (descriptor.sec_state.encrypted) {
+            HandleEncryptedConnection(connection_handle);
+            return;
+        }
+    }
     const int result = ble_gap_security_initiate(connection_handle);
-    if (result != 0) {
+    if (result == 0) {
+        ESP_LOGI(kTag, "Pairing/encryption requested");
+    } else if (result == BLE_HS_EALREADY) {
+        ESP_LOGI(kTag, "Pairing/encryption already in progress");
+    } else {
         ESP_LOGE(kTag, "Unable to initiate encryption: %d", result);
         ble_gap_terminate(connection_handle, BLE_ERR_REM_USER_CONN_TERM);
     }
+}
+
+void AncsClient::HandleEncryptedConnection(uint16_t connection_handle) {
+    if (!connected_ || connection_handle != connection_handle_ || encrypted_) {
+        return;
+    }
+    ble_gap_conn_desc descriptor = {};
+    const int result = ble_gap_conn_find(connection_handle, &descriptor);
+    if (result != 0 || !descriptor.sec_state.encrypted || !VerifyBondedPeer(connection_handle)) {
+        ESP_LOGW(kTag, "Encrypted link validation failed: rc=%d encrypted=%u", result,
+                 result == 0 ? descriptor.sec_state.encrypted : 0);
+        ble_gap_terminate(connection_handle, BLE_ERR_AUTH_FAIL);
+        return;
+    }
+    encrypted_ = true;
+    ESP_LOGI(kTag, "Encrypted ANCS connection established: authenticated=%u bonded=%u",
+             descriptor.sec_state.authenticated, descriptor.sec_state.bonded);
+    ble_gattc_exchange_mtu(connection_handle, nullptr, nullptr);
+    DiscoverServiceChanged();
 }
 
 bool AncsClient::VerifyBondedPeer(uint16_t connection_handle) const {
@@ -552,6 +651,11 @@ int AncsClient::GapEvent(struct ble_gap_event* event, void* arg) {
             client->connection_handle_ = event->connect.conn_handle;
             client->session_id_ = NewSessionId();
             ESP_LOGI(kTag, "iPhone connected; session=%s", client->session_id_.c_str());
+            if (!client->VerifyBondedPeer(event->connect.conn_handle)) {
+                ESP_LOGW(kTag, "Connection rejected: a different iPhone is already bonded");
+                ble_gap_terminate(event->connect.conn_handle, BLE_ERR_AUTH_FAIL);
+                return 0;
+            }
             client->BeginSecurity(event->connect.conn_handle);
             return 0;
 
@@ -562,16 +666,24 @@ int AncsClient::GapEvent(struct ble_gap_event* event, void* arg) {
             return 0;
 
         case BLE_GAP_EVENT_ENC_CHANGE:
-            if (event->enc_change.status != 0 ||
-                !client->VerifyBondedPeer(event->enc_change.conn_handle)) {
+            if (event->enc_change.status != 0) {
                 ESP_LOGW(kTag, "Encryption rejected: status=%d", event->enc_change.status);
                 ble_gap_terminate(event->enc_change.conn_handle, BLE_ERR_AUTH_FAIL);
                 return 0;
             }
-            client->encrypted_ = true;
-            ESP_LOGI(kTag, "Encrypted ANCS connection established");
-            ble_gattc_exchange_mtu(event->enc_change.conn_handle, nullptr, nullptr);
-            client->DiscoverServiceChanged();
+            client->HandleEncryptedConnection(event->enc_change.conn_handle);
+            return 0;
+
+        case BLE_GAP_EVENT_PASSKEY_ACTION:
+            ESP_LOGI(kTag, "Pairing IO action=%u", event->passkey.params.action);
+            if (event->passkey.params.action == BLE_SM_IOACT_NUMCMP) {
+                struct ble_sm_io io = {};
+                io.action = BLE_SM_IOACT_NUMCMP;
+                io.numcmp_accept = 1;
+                const int result = ble_sm_inject_io(event->passkey.conn_handle, &io);
+                ESP_LOGI(kTag, "Just Works numeric comparison accepted: rc=%d", result);
+                return result;
+            }
             return 0;
 
         case BLE_GAP_EVENT_NOTIFY_RX:
@@ -586,9 +698,20 @@ int AncsClient::GapEvent(struct ble_gap_event* event, void* arg) {
             }
             return 0;
 
-        case BLE_GAP_EVENT_REPEAT_PAIRING:
-            ESP_LOGW(kTag, "Repeat pairing refused; erase flash before changing phones");
-            return BLE_GAP_REPEAT_PAIRING_IGNORE;
+        case BLE_GAP_EVENT_REPEAT_PAIRING: {
+            if (!client->VerifyBondedPeer(event->repeat_pairing.conn_handle)) {
+                ESP_LOGW(kTag, "Repeat pairing refused for a different iPhone");
+                return BLE_GAP_REPEAT_PAIRING_IGNORE;
+            }
+            ble_gap_conn_desc descriptor = {};
+            if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &descriptor) != 0 ||
+                ble_store_util_delete_peer(&descriptor.peer_id_addr) != 0) {
+                ESP_LOGW(kTag, "Unable to replace the stale iPhone bond");
+                return BLE_GAP_REPEAT_PAIRING_IGNORE;
+            }
+            ESP_LOGI(kTag, "Stale bond removed; retrying pairing with the same iPhone");
+            return BLE_GAP_REPEAT_PAIRING_RETRY;
+        }
 
         case BLE_GAP_EVENT_ADV_COMPLETE:
             client->StartAdvertising();

@@ -61,6 +61,7 @@ private:
 
     void StartAdvertising();
     void BeginSecurity(uint16_t connection_handle);
+    void HandleEncryptedConnection(uint16_t connection_handle);
     bool VerifyBondedPeer(uint16_t connection_handle) const;
     void DiscoverServiceChanged();
     void DiscoverAncs();

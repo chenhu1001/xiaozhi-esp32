@@ -1097,6 +1097,12 @@ idf_component_register(SRCS ${SOURCES}
                         ${MAIN_PRIV_REQUIRES_EXTRA}
                     )
 
+if(CONFIG_ENABLE_IOS_ANCS_RELAY AND NOT CMAKE_BUILD_EARLY_EXPANSION)
+    # ESP-IDF 6.0.2's NimBLE NVS sorter triggers a GCC 15 false positive when MAX_BONDS is 1.
+    idf_component_get_property(BT_COMPONENT_LIB bt COMPONENT_LIB)
+    target_compile_options(${BT_COMPONENT_LIB} PRIVATE -Wno-error=array-bounds)
+endif()
+
 # Use target_compile_definitions to define the reported board identity
 # If BOARD_NAME is empty, use BOARD_TYPE
 if(NOT BOARD_NAME)
